@@ -38,6 +38,22 @@
         - `如果用户启动容器时候指定了运行的命令，则会覆盖掉 CMD 指定的命令`
 
 - 我们写一个go的http服务 main.go 编译 为 http-demo
+```
+package main
+
+import "net/http"
+
+func main() {
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("hey boy"))
+	})
+	err := http.ListenAndServe(":80", nil)
+	if err != nil {
+		panic(err)
+	}
+}
+
+```
 - 编写一个基于 ubuntu18.04的 Dockerfile
 ```
 FROM ubuntu:18.04
@@ -59,4 +75,103 @@ docker run -d -p 80:80 http:01
 -d 守护进程
 -p 80:80 映射端口:容器端口 镜像名称：版本
 ```
-    
+- 访问镜像实例
+```
+127.0.0.1
+![img.png](img.png)
+```
+
+2.使用docker-compose生成运行容器
+- 我们用之前的 http demo 指定 3 个 web 容器，以及 1 个 haproxy 容器来做一个 demo
+- 1）安装 docker-compose
+```
+apt-get install docker-compose
+```
+- 2）生成 haproxy 目录，在其中生成一个 haproxy.cfg 文件
+```
+global
+  log 127.0.0.1 local0
+  log 127.0.0.1 local1 notice
+
+defaults
+  log global
+  mode http
+  option httplog
+  option dontlognull
+  timeout connect 5000ms
+  timeout client 50000ms
+  timeout server 50000ms
+
+listen stats
+    bind 0.0.0.0:70
+    stats enable
+    stats uri /
+
+frontend balancer
+    bind 0.0.0.0:80
+    mode http
+    default_backend web_backends
+
+backend web_backends
+    mode http
+    option forwardfor
+    balance roundrobin
+    server weba weba:80 check
+    server webb webb:80 check
+    server webc webc:80 check
+    option httpchk GET /
+    http-check expect status 200
+
+
+```
+- 3）编写 docker-compose.yml 文件
+```
+weba:
+  build: ./web
+  expose:
+    - 80
+
+webb:
+  build: ./web
+  expose:
+    - 80
+
+webc:
+  build: ./web
+  expose:
+    - 80
+
+haproxy:
+  image: haproxy:latest
+  volumes:
+    - /root/www/compose-haproxy-web/haproxy:/haproxy-override
+    - /root/www/compose-haproxy-web/haproxy/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+  links:
+    - weba
+    - webb
+    - webc
+  ports:
+    - "80:80"
+    - "70:70"
+  expose:
+    - "80"
+    - "70"
+
+```
+- 4）目录结构如下
+```
+├── docker-compose.yml
+├── haproxy
+│   └── haproxy.cfg
+└── web
+    ├── Dockerfile
+    ├── http-demo
+    ├── http.out
+    └── start.sh
+```
+- 5） 在该目录执行 docker-compose up || docker-compose up -d
+```
+访问 web 服务 127.0.0.1，请求会被haproxy 分发到不同的容器  
+访问 happroxy 统计服务 127.0.0.1:70   
+![img_1.png](img_1.png)
+```
